@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCORM Player MVP</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .upload-section {
+            background: #f8f9fa;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .upload-section:hover {
+            border-color: #007bff;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            display: inline-block;
+        }
+        
+        .upload-btn:hover {
+            background: #0056b3;
+        }
+        
+        .courses-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .course-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .course-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        
+        .course-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .course-meta {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .launch-btn {
+            background: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+        }
+        
+        .launch-btn:hover {
+            background: #218838;
+        }
+        
+        #player-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+        }
+        
+        .player-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            height: 90%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .player-header {
+            background: #333;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        #content-frame {
+            width: 100%;
+            height: calc(100% - 60px);
+            border: none;
+        }
+        
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SCORM Player MVP</h1>
+        
+        <div class="upload-section">
+            <p style="margin-bottom: 20px; color: #666;">Upload a SCORM package (ZIP file)</p>
+            <label for="file-input" class="upload-btn">Choose File</label>
+            <input type="file" id="file-input" accept=".zip">
+            <div id="upload-status" class="status" style="display: none; margin-top: 20px;"></div>
+        </div>
+        
+        <div id="courses-section">
+            <h2 style="color: #333; margin-bottom: 20px;">Available Courses</h2>
+            <div id="courses-grid" class="courses-grid"></div>
+        </div>
+    </div>
+    
+    <div id="player-modal">
+        <div class="player-container">
+            <div class="player-header">
+                <span id="player-title">Course Player</span>
+                <button class="close-btn" onclick="closePlayer()">&times;</button>
+            </div>
+            <iframe id="content-frame"></iframe>
+        </div>
+    </div>
+    
+    <script src="/js/scorm-api.js"></script>
+    <script>
+        let courses = [];
+        
+        // Load courses on page load
+        window.onload = function() {
+            loadCourses();
+        };
+        
+        // File upload handler
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                uploadCourse(file);
+            }
+        });
+        
+        function uploadCourse(file) {
+            const formData = new FormData();
+            formData.append('scormPackage', file);
+            
+            const status = document.getElementById('upload-status');
+            status.textContent = 'Uploading...';
+            status.className = 'status';
+            status.style.display = 'block';
+            
+            fetch('/api/courses/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    status.textContent = 'Course uploaded successfully!';
+                    status.className = 'status success';
+                    loadCourses();
+                    document.getElementById('file-input').value = '';
+                } else {
+                    throw new Error(data.error || 'Upload failed');
+                }
+            })
+            .catch(error => {
+                status.textContent = 'Error: ' + error.message;
+                status.className = 'status error';
+            });
+        }
+        
+        function loadCourses() {
+            fetch('/api/courses')
+                .then(response => response.json())
+                .then(data => {
+                    courses = data;
+                    displayCourses();
+                });
+        }
+        
+        function displayCourses() {
+            const grid = document.getElementById('courses-grid');
+            grid.innerHTML = '';
+            
+            if (courses.length === 0) {
+                grid.innerHTML = '<p style="color: #666;">No courses available. Upload a SCORM package to get started.</p>';
+                return;
+            }
+            
+            courses.forEach(course => {
+                const card = document.createElement('div');
+                card.className = 'course-card';
+                card.innerHTML = `
+                    <div class="course-title">${course.title}</div>
+                    <div class="course-meta">
+                        Uploaded: ${new Date(course.uploadedAt).toLocaleDateString()}
+                    </div>
+                    <button class="launch-btn" onclick="launchCourse('${course.id}', '${course.title}')">
+                        Launch Course
+                    </button>
+                `;
+                grid.appendChild(card);
+            });
+        }
+        
+        function launchCourse(courseId, title) {
+            fetch(`/api/courses/${courseId}/launch`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.launchUrl) {
+                        // Initialize SCORM API
+                        window.API.initialize(courseId);
+                        
+                        // Show player
+                        document.getElementById('player-title').textContent = title;
+                        document.getElementById('player-modal').style.display = 'block';
+                        document.getElementById('content-frame').src = data.launchUrl;
+                    }
+                })
+                .catch(error => {
+                    alert('Error launching course: ' + error.message);
+                });
+        }
+        
+        function closePlayer() {
+            // Call LMSFinish if course is active
+            if (window.API.courseId) {
+                window.API.LMSFinish('');
+            }
+            
+            document.getElementById('player-modal').style.display = 'none';
+            document.getElementById('content-frame').src = '';
+            window.API.courseId = null;
+        }
+    </script>
+</body>
+</html>
