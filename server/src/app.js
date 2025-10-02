@@ -1,17 +1,19 @@
+// server/src/app.js
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = require('fs').promises;
 const unzipper = require('unzipper');
 const xml2js = require('xml2js');
 
 const app = express();
+// Increase payload limits
+app.use(express.json({limit: '500mb'}));
+app.use(express.urlencoded({limit: '500mb', extended: true}));
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../client')));
 app.use('/courses', express.static(path.join(__dirname, '../uploads')));
 
@@ -19,7 +21,7 @@ app.use('/courses', express.static(path.join(__dirname, '../uploads')));
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
         const uploadPath = path.join(__dirname, '../uploads');
-        await fs.mkdir(uploadPath, { recursive: true });
+        await fsPromises.mkdir(uploadPath, { recursive: true });
         cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
@@ -29,6 +31,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
     storage,
+    limits: {
+        fileSize: 500 * 1024 * 1024 // 500MB limit
+    },
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'application/zip' || file.originalname.endsWith('.zip')) {
             cb(null, true);
@@ -97,14 +102,14 @@ app.post('/api/courses/upload', upload.single('scormPackage'), async (req, res) 
         const extractPath = path.join(__dirname, '../uploads', courseId);
         
         // Extract ZIP file
-        await fs.mkdir(extractPath, { recursive: true });
+        await fsPromises.mkdir(extractPath, { recursive: true });
         await fs.createReadStream(file.path)
             .pipe(unzipper.Extract({ path: extractPath }))
             .promise();
         
         // Parse manifest
         const manifestPath = path.join(extractPath, 'imsmanifest.xml');
-        const manifestContent = await fs.readFile(manifestPath, 'utf8');
+        const manifestContent = await fsPromises.readFile(manifestPath, 'utf8');
         const parser = new xml2js.Parser();
         const manifest = await parser.parseStringPromise(manifestContent);
         
@@ -122,12 +127,17 @@ app.post('/api/courses/upload', upload.single('scormPackage'), async (req, res) 
         courses.set(courseId, courseInfo);
         
         // Clean up uploaded zip
-        await fs.unlink(file.path);
+        await fsPromises.unlink(file.path);
         
         res.json({ success: true, course: courseInfo });
     } catch (error) {
-        console.error('Upload error:', error);
-        res.status(500).json({ error: 'Failed to process SCORM package' });
+        console.log('upload error:', error);
+        console.error('Upload error details:', {
+            message: error.message,
+            stack: error.stack,
+            file: req.file ? req.file.filename : 'no file'
+        });
+        res.status(500).json({ error: 'Failed to process SCORM package: ' + error.message });
     }
 });
 
@@ -144,6 +154,29 @@ app.get('/api/courses/:courseId/launch', (req, res) => {
         res.json({ launchUrl });
     } else {
         res.status(404).json({ error: 'Course not found' });
+    }
+});
+
+// Delete course endpoint
+app.delete('/api/courses/:courseId', async (req, res) => {
+    try {
+        const courseId = req.params.courseId;
+        
+        // Remove from memory
+        if (courses.has(courseId)) {
+            courses.delete(courseId);
+            
+            // Delete the folder from disk
+            const coursePath = path.join(__dirname, '../uploads', courseId);
+            await fsPromises.rm(coursePath, { recursive: true, force: true });
+            
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ error: 'Course not found' });
+        }
+    } catch (error) {
+        console.error('Delete error:', error);
+        res.status(500).json({ error: 'Failed to delete course' });
     }
 });
 

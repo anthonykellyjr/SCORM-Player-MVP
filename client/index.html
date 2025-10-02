@@ -111,6 +111,22 @@
             background: #218838;
         }
         
+        .delete-btn {
+            background: #dc3545;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 14px;
+            width: 100%;
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+        }
+        
         #player-modal {
             display: none;
             position: fixed;
@@ -173,6 +189,11 @@
             background: #f8d7da;
             color: #721c24;
         }
+
+        #upload-progress {
+            height: 20px;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
@@ -224,29 +245,63 @@
             formData.append('scormPackage', file);
             
             const status = document.getElementById('upload-status');
-            status.textContent = 'Uploading...';
+            const fileSize = (file.size / 1024 / 1024).toFixed(2);
+            status.innerHTML = `
+                <div>Uploading ${file.name} (${fileSize} MB)...</div>
+                <div style="margin-top: 10px;">
+                    <progress id="upload-progress" max="100" value="0" style="width: 100%;"></progress>
+                    <span id="progress-text">0%</span>
+                </div>
+            `;
             status.className = 'status';
             status.style.display = 'block';
             
-            fetch('/api/courses/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    status.textContent = 'Course uploaded successfully!';
-                    status.className = 'status success';
-                    loadCourses();
-                    document.getElementById('file-input').value = '';
-                } else {
-                    throw new Error(data.error || 'Upload failed');
+            const xhr = new XMLHttpRequest();
+            
+            // Track upload progress
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    document.getElementById('upload-progress').value = percentComplete;
+                    document.getElementById('progress-text').textContent = Math.round(percentComplete) + '%';
                 }
-            })
-            .catch(error => {
-                status.textContent = 'Error: ' + error.message;
+            });
+            
+            xhr.addEventListener('load', () => {
+                if (xhr.status === 200) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        if (data.success) {
+                            status.textContent = 'Course uploaded successfully!';
+                            status.className = 'status success';
+                            loadCourses();
+                            document.getElementById('file-input').value = '';
+                        } else {
+                            throw new Error(data.error || 'Upload failed');
+                        }
+                    } catch (error) {
+                        status.textContent = 'Error: ' + error.message;
+                        status.className = 'status error';
+                    }
+                } else {
+                    status.textContent = 'Error: Upload failed (Status ' + xhr.status + ')';
+                    status.className = 'status error';
+                }
+            });
+            
+            xhr.addEventListener('error', () => {
+                status.textContent = 'Error: Network error during upload';
                 status.className = 'status error';
             });
+            
+            xhr.addEventListener('timeout', () => {
+                status.textContent = 'Error: Upload timed out';
+                status.className = 'status error';
+            });
+            
+            xhr.open('POST', '/api/courses/upload');
+            xhr.timeout = 300000; // 5 minute timeout
+            xhr.send(formData);
         }
         
         function loadCourses() {
@@ -278,6 +333,9 @@
                     <button class="launch-btn" onclick="launchCourse('${course.id}', '${course.title}')">
                         Launch Course
                     </button>
+                    <button class="delete-btn" onclick="deleteCourse('${course.id}')">
+                        Delete
+                    </button>
                 `;
                 grid.appendChild(card);
             });
@@ -302,6 +360,25 @@
                 });
         }
         
+        function deleteCourse(courseId) {
+            if (confirm('Are you sure you want to delete this course?')) {
+                fetch(`/api/courses/${courseId}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        loadCourses(); // Reload the course list
+                    } else {
+                        alert('Error deleting course: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error deleting course: ' + error.message);
+                });
+            }
+        }
+        
         function closePlayer() {
             // Call LMSFinish if course is active
             if (window.API.courseId) {
@@ -312,6 +389,32 @@
             document.getElementById('content-frame').src = '';
             window.API.courseId = null;
         }
+        
+        // Drag and drop functionality
+        const uploadSection = document.querySelector('.upload-section');
+
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.style.borderColor = '#007bff';
+            uploadSection.style.backgroundColor = '#e7f3ff';
+        });
+
+        uploadSection.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadSection.style.borderColor = '#ddd';
+            uploadSection.style.backgroundColor = '#f8f9fa';
+        });
+
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.style.borderColor = '#ddd';
+            uploadSection.style.backgroundColor = '#f8f9fa';
+            
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.zip')) {
+                uploadCourse(file);
+            }
+        });
     </script>
 </body>
 </html>
