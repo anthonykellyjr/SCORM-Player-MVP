@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="/js/utils/analytics.js"></script>
     <title>Course Player</title>
     <style>
         * {
@@ -89,7 +90,7 @@
                     <span id="userName">User</span>
                 </div>
             </div>
-            <button class="close-btn" onclick="closePlayer()">✕ Exit Course</button>
+            <button class="close-btn" id="closePlayerBtn">✕ Exit Course</button>
         </div>
         <iframe id="contentFrame" class="content-frame"></iframe>
     </div>
@@ -112,7 +113,8 @@
 
         // Check authentication and load course
         window.onload = async function() {
-            token = localStorage.getItem('token');
+            // FIX: Use 'accessToken' not 'token'
+            token = localStorage.getItem('accessToken');
             const userStr = localStorage.getItem('user');
             
             if (!token || !userStr) {
@@ -121,6 +123,11 @@
             }
 
             currentUser = JSON.parse(userStr);
+            
+            // IMPORTANT: Make token available to iframe/SCORM content
+            // Store in window object so SCORM API can access it
+            window.authToken = token;
+            window.currentUser = currentUser;
 
             // Display course and user info
             document.getElementById('courseTitle').textContent = courseTitle || 'Course';
@@ -132,9 +139,6 @@
                 userName: currentUser.name
             });
             
-            // The SCORM API is already initialized with courseId and userId from URL params
-            // Just need to ensure the token is available for authenticated requests
-            
             // Load course content
             try {
                 const response = await fetch(`${API_URL}/api/courses/${courseId}/launch`, {
@@ -145,7 +149,7 @@
 
                 if (response.status === 401 || response.status === 403) {
                     alert('Session expired. Please login again.');
-                    localStorage.removeItem('token');
+                    localStorage.removeItem('accessToken');
                     localStorage.removeItem('user');
                     window.location.href = '/login.html';
                     return;
@@ -176,6 +180,14 @@
             // Return to course library
             window.location.href = 'index.html';
         }
+
+        // FIX: Use addEventListener instead of inline onclick
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeBtn = document.getElementById('closePlayerBtn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', closePlayer);
+            }
+        });
         
         // Handle browser back button and page close
         window.addEventListener('beforeunload', function(e) {

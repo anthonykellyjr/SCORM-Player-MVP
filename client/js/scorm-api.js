@@ -1,267 +1,317 @@
-// Authentication-aware SCORM API with session tracking
+// SCORM API Implementation with Authentication & Session Management
 (function() {
-    const API_ENDPOINT = window.location.hostname === 'localhost' 
-        ? 'http://localhost:3000' 
-        : 'https://dev.orthoskool.com';
-    
-    // Generate unique session ID
+    'use strict';
+
+    // Use current origin
+    const API_URL = window.location.origin;
+    console.log('SCORM API using:', API_URL);
+
+    // Get URL parameters
+    function getUrlParameter(name) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(name);
+    }
+
+    // Try to get token from multiple sources
+    function getAuthToken() {
+        // 1. Try parent window (if we're in an iframe)
+        try {
+            if (window.parent && window.parent !== window) {
+                const parentToken = window.parent.localStorage.getItem('accessToken');
+                if (parentToken) {
+                    console.log('✓ Got token from parent window');
+                    return parentToken;
+                }
+            }
+        } catch (e) {
+            console.log('Cannot access parent localStorage (cross-origin)');
+        }
+
+        // 2. Try current window localStorage
+        const localToken = localStorage.getItem('accessToken');
+        if (localToken) {
+            console.log('✓ Got token from local storage');
+            return localToken;
+        }
+
+        // 3. Try sessionStorage as fallback
+        const sessionToken = sessionStorage.getItem('accessToken');
+        if (sessionToken) {
+            console.log('✓ Got token from session storage');
+            return sessionToken;
+        }
+
+        console.warn('⚠ No auth token found in any location');
+        return null;
+    }
+
+    const courseId = getUrlParameter('courseId');
+    const userId = getUrlParameter('userId');
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Get course and user info from PARENT window URL (since SCORM content loads in iframe)
-    let urlParams;
-    try {
-        // Try to get params from parent window first
-        urlParams = new URLSearchParams(window.parent.location.search);
-    } catch (e) {
-        // If can't access parent (cross-origin), try own window
-        urlParams = new URLSearchParams(window.location.search);
-    }
-    
-    const courseId = urlParams.get('courseId');
-    const userId = urlParams.get('userId');
-    
-    // Get auth token from localStorage
-    const getToken = () => localStorage.getItem('token');
-    
-    // Heartbeat to track active session
+    console.log('SCORM API Loaded (with auth & session tracking)', {
+        courseId,
+        userId,
+        sessionId,
+        hasToken: !!getAuthToken(),
+        apiUrl: API_URL
+    });
+
+    // Session heartbeat to keep session alive
     let heartbeatInterval = null;
     
     function startHeartbeat() {
         console.log('Starting session heartbeat...');
         
-        // Send immediate heartbeat on start
-        sendHeartbeat();
-        
         // Send heartbeat every 30 seconds
-        heartbeatInterval = setInterval(() => {
-            sendHeartbeat();
-        }, 30000); // 30 seconds
+        heartbeatInterval = setInterval(async () => {
+            await sendHeartbeat();
+        }, 30000);
+        
+        // Send initial heartbeat
+        sendHeartbeat();
     }
-    
-    function sendHeartbeat() {
-        const token = getToken();
+
+    async function sendHeartbeat() {
+        const token = getAuthToken();
         if (!token) {
-            console.warn('No auth token available for heartbeat');
+            console.log('No auth token available for heartbeat');
             return;
         }
-        
-        fetch(`${API_ENDPOINT}/api/sessions/heartbeat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                sessionId,
-                courseId,
-                userId
-            })
-        })
-        .then(res => {
-            if (!res.ok) {
-                console.error('Heartbeat failed:', res.status);
+
+        try {
+            const response = await fetch(`${API_URL}/api/sessions/${sessionId}/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    courseId,
+                    userId
+                })
+            });
+            
+            if (!response.ok) {
+                console.error('Heartbeat failed:', response.status);
             }
-            return res.json();
-        })
-        .then(data => {
-            console.log('Heartbeat sent:', data);
-        })
-        .catch(err => console.error('Heartbeat error:', err));
+        } catch (error) {
+            console.error('Heartbeat failed:', error);
+        }
     }
-    
+
     function stopHeartbeat() {
         if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
             heartbeatInterval = null;
-            console.log('Heartbeat stopped');
+            console.log('Session heartbeat stopped');
         }
     }
-    
-    // Helper function to send data to backend WITH AUTH
-    function sendToBackend(action, element, value) {
-        const token = getToken();
+
+    // SCORM data store
+    const scormData = {
+        'cmi.core.student_id': userId || 'unknown',
+        'cmi.core.student_name': 'Student',
+        'cmi.core.lesson_location': '',
+        'cmi.core.credit': 'credit',
+        'cmi.core.lesson_status': 'not attempted',
+        'cmi.core.entry': 'ab-initio',
+        'cmi.core.score.raw': '',
+        'cmi.core.score.max': '100',
+        'cmi.core.score.min': '0',
+        'cmi.core.total_time': '0000:00:00.00',
+        'cmi.core.lesson_mode': 'normal',
+        'cmi.core.exit': '',
+        'cmi.core.session_time': '0000:00:00.00',
+        'cmi.suspend_data': '',
+        'cmi.launch_data': '',
+        'cmi.comments': '',
+        'cmi.comments_from_lms': ''
+    };
+
+    // Helper function to send data to backend
+    async function sendToBackend(endpoint, data) {
+        const token = getAuthToken();
         if (!token) {
             console.error('No auth token available');
-            return Promise.reject('No authentication');
+            throw new Error('No authentication');
         }
-        
-        return fetch(`${API_ENDPOINT}/api/scorm/${courseId}/${userId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                action,
-                element,
-                value,
-                sessionId
-            })
-        })
-        .then(res => {
-            if (res.status === 401 || res.status === 403) {
-                console.error('Authentication failed - redirecting to login');
-                // Optional: redirect to login
-                // window.location.href = '/login.html';
-                throw new Error('Authentication failed');
+
+        try {
+            const response = await fetch(`${API_URL}${endpoint}`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    courseId,
+                    userId,
+                    ...data
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
-            return res.json();
-        })
-        .catch(err => {
-            console.error('Backend communication error:', err);
-            throw err;
-        });
+
+            return await response.json();
+        } catch (error) {
+            console.error('Backend request failed:', error);
+            throw error;
+        }
     }
-    
-    // SCORM API Implementation
+
+    // SCORM API 1.2 Implementation
     window.API = {
         _initialized: false,
         _finished: false,
-        _errorCode: '0',
-        _errorString: '',
         _lastError: '0',
-        
-        // SCORM 1.2 API Methods
-        LMSInitialize: function(parameter) {
-            console.log('LMSInitialize called');
-            
-            if (parameter !== '') {
-                this._errorCode = '201';
-                this._errorString = 'Invalid argument';
-                return 'false';
-            }
+        courseId: courseId,
+        userId: userId,
+        sessionId: sessionId,
+
+        LMSInitialize: function(param) {
+            console.log('LMSInitialize called', {
+                alreadyInitialized: this._initialized,
+                finished: this._finished,
+                hasToken: !!getAuthToken()
+            });
             
             if (this._initialized) {
-                this._errorCode = '101';
-                this._errorString = 'Already initialized';
+                console.warn('Already initialized, returning false');
+                this._lastError = '101'; // Already initialized
                 return 'false';
             }
-            
+
+            if (!getAuthToken()) {
+                console.error('❌ No auth token - cannot initialize');
+                this._lastError = '101';
+                return 'false';
+            }
+
             this._initialized = true;
-            this._errorCode = '0';
+            this._finished = false;
+            this._lastError = '0';
             
-            // Start session tracking
+            // Start session heartbeat
             startHeartbeat();
-            
-            // Notify backend of initialization
-            sendToBackend('Initialize', null, null)
-                .then(() => console.log('✓ SCORM session initialized'))
-                .catch(err => console.error('✗ Failed to initialize session:', err));
-            
-            console.log('SCORM API Initialized', { courseId, userId, sessionId });
+
+            // Initialize session on backend
+            sendToBackend('/api/scorm/initialize', {
+                sessionId: sessionId
+            }).then(() => {
+                console.log('✅ SCORM session initialized on backend');
+            }).catch(error => {
+                console.error('❌ Failed to initialize session on backend:', error);
+                // Don't fail the initialization - the content can still work locally
+            });
+
+            console.log('✅ LMSInitialize returning true');
             return 'true';
         },
-        
-        LMSFinish: function(parameter) {
+
+        LMSFinish: function(param) {
             console.log('LMSFinish called');
             
-            if (parameter !== '') {
-                this._errorCode = '201';
-                return 'false';
-            }
-            
             if (!this._initialized) {
-                this._errorCode = '301';
+                this._lastError = '301'; // Not initialized
                 return 'false';
             }
-            
+
             if (this._finished) {
-                this._errorCode = '101';
+                this._lastError = '101'; // Already finished
                 return 'false';
             }
-            
+
             this._finished = true;
-            this._errorCode = '0';
             
-            // Stop session tracking
+            // Stop heartbeat
             stopHeartbeat();
-            
-            // Commit any pending data
+
+            // Commit final data
             this.LMSCommit('');
-            
-            // Notify backend of termination
-            sendToBackend('Terminate', null, null)
-                .then(() => console.log('✓ SCORM session terminated'))
-                .catch(err => console.error('✗ Failed to terminate session:', err));
-            
-            console.log('SCORM API Finished');
+
+            // Terminate session on backend
+            sendToBackend('/api/scorm/terminate', {
+                sessionId: sessionId
+            }).then(() => {
+                console.log('✅ SCORM session terminated');
+            }).catch(error => {
+                console.error('❌ Failed to terminate session:', error);
+            });
+
             return 'true';
         },
-        
+
         LMSGetValue: function(element) {
-            if (!this._initialized) {
-                this._errorCode = '301';
+            console.log('LMSGetValue called for:', element);
+            
+            if (!this._initialized || this._finished) {
+                this._lastError = '301';
                 return '';
             }
-            
-            if (this._finished) {
-                this._errorCode = '101';
-                return '';
-            }
-            
-            console.log(`LMSGetValue called for: ${element}`);
-            
-            // In a real implementation, this would be synchronous from local cache
-            // For now, we'll return empty and let the async call happen in background
-            sendToBackend('GetValue', element, null)
-                .then(data => {
-                    console.log(`LMSGetValue(${element}):`, data.value);
-                })
-                .catch(err => console.error('LMSGetValue failed:', err));
-            
-            this._errorCode = '0';
-            return ''; // SCORM requires synchronous return
+
+            // Fetch from backend (async - don't wait for it)
+            sendToBackend('/api/scorm/getValue', {
+                element: element
+            }).then(response => {
+                if (response.value !== undefined) {
+                    scormData[element] = response.value;
+                }
+            }).catch(error => {
+                console.error('LMSGetValue backend failed:', error);
+            });
+
+            const value = scormData[element] !== undefined ? scormData[element] : '';
+            this._lastError = '0';
+            return value;
         },
-        
+
         LMSSetValue: function(element, value) {
-            if (!this._initialized) {
-                this._errorCode = '301';
-                return 'false';
-            }
-            
-            if (this._finished) {
-                this._errorCode = '101';
-                return 'false';
-            }
-            
             console.log(`LMSSetValue(${element}, ${value})`);
             
-            sendToBackend('SetValue', element, value)
-                .then(data => {
-                    if (!data.success) {
-                        console.error('✗ LMSSetValue failed on server');
-                    } else {
-                        console.log(`✓ LMSSetValue(${element}) saved`);
-                    }
-                })
-                .catch(err => console.error('✗ LMSSetValue failed:', err));
-            
-            this._errorCode = '0';
-            return 'true';
+            if (!this._initialized || this._finished) {
+                this._lastError = '301';
+                return 'false';
+            }
+
+            if (scormData.hasOwnProperty(element)) {
+                scormData[element] = value;
+                this._lastError = '0';
+                
+                // Send to backend (async - don't wait for it)
+                sendToBackend('/api/scorm/setValue', {
+                    element: element,
+                    value: value
+                }).catch(error => {
+                    console.error('LMSSetValue backend failed:', error);
+                });
+                
+                return 'true';
+            }
+
+            this._lastError = '401'; // Not implemented element
+            return 'false';
         },
-        
-        LMSCommit: function(parameter) {
-            if (parameter !== '') {
-                this._errorCode = '201';
-                return 'false';
-            }
-            
-            if (!this._initialized) {
-                this._errorCode = '301';
-                return 'false';
-            }
-            
+
+        LMSCommit: function(param) {
             console.log('LMSCommit called');
             
-            // Commit is implicit in our implementation since SetValue saves immediately
-            this._errorCode = '0';
+            if (!this._initialized || this._finished) {
+                this._lastError = '301';
+                return 'false';
+            }
+
+            this._lastError = '0';
             return 'true';
         },
-        
+
         LMSGetLastError: function() {
-            return this._errorCode;
+            return this._lastError;
         },
-        
+
         LMSGetErrorString: function(errorCode) {
             const errors = {
                 '0': 'No error',
@@ -278,36 +328,18 @@
             };
             return errors[errorCode] || 'Unknown error';
         },
-        
+
         LMSGetDiagnostic: function(errorCode) {
             return `Error ${errorCode}: ${this.LMSGetErrorString(errorCode)}`;
         }
     };
-    
-    // Also support SCORM 2004 API (basic compatibility)
-    window.API_1484_11 = {
-        Initialize: function(param) { return window.API.LMSInitialize(param); },
-        Terminate: function(param) { return window.API.LMSFinish(param); },
-        GetValue: function(element) { return window.API.LMSGetValue(element); },
-        SetValue: function(element, value) { return window.API.LMSSetValue(element, value); },
-        Commit: function(param) { return window.API.LMSCommit(param); },
-        GetLastError: function() { return window.API.LMSGetLastError(); },
-        GetErrorString: function(code) { return window.API.LMSGetErrorString(code); },
-        GetDiagnostic: function(code) { return window.API.LMSGetDiagnostic(code); }
-    };
-    
-    // Clean up on page unload
-    window.addEventListener('beforeunload', () => {
-        stopHeartbeat();
-        if (window.API._initialized && !window.API._finished) {
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        if (window.API && window.API._initialized && !window.API._finished) {
             window.API.LMSFinish('');
         }
     });
-    
-    console.log('SCORM API Loaded (with auth & session tracking)', { 
-        courseId, 
-        userId, 
-        sessionId,
-        hasToken: !!getToken()
-    });
+
+    console.log('✅ SCORM API 1.2 ready');
 })();

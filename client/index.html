@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="css/index.css" rel="stylesheet" />
+    <script src="/js/utils/analytics.js"></script>
     <title>SCORM Player MVP</title>
 </head>
 <body>
@@ -15,7 +16,7 @@
             <div class="header-controls">
                 <span id="user-display" style="color: #666; margin-right: 15px;"></span>
                 <a href="admin.html" class="admin-link" id="admin-link" style="display: none;">📊 Admin Dashboard</a>
-                <button onclick="logout()" class="admin-link" style="background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Logout</button>
+                <button id="logout-btn" class="admin-link" style="background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">Logout</button>
             </div>
         </div>
         
@@ -36,7 +37,7 @@
         <div class="player-container">
             <div class="player-header">
                 <span id="player-title">Course Player</span>
-                <button class="close-btn" onclick="closePlayer()">&times;</button>
+                <button class="close-btn" id="close-player-btn">&times;</button>
             </div>
             <iframe id="content-frame"></iframe>
         </div>
@@ -220,7 +221,7 @@
                 card.className = 'course-card';
                 
                 const deleteButton = currentUser.role === 'admin' 
-                    ? `<button class="delete-btn" onclick="showDeleteModal('${course.id}', '${course.title.replace(/'/g, "\\'")}')">×</button>`
+                    ? `<button class="delete-btn" data-course-id="${course.id}" data-course-title="${course.title.replace(/"/g, '&quot;')}">×</button>`
                     : '';
                 
                 card.innerHTML = `
@@ -229,7 +230,7 @@
                         Uploaded: ${new Date(course.uploadedAt).toLocaleDateString()}
                     </div>
                     <div class="button-group">
-                        <button class="launch-btn" onclick="launchCourse('${course.id}', '${course.title}')">
+                        <button class="launch-btn" data-course-id="${course.id}" data-course-title="${course.title.replace(/"/g, '&quot;')}">
                             Launch Course
                         </button>
                         ${deleteButton}
@@ -247,6 +248,53 @@
             courseToDelete = courseId;
             document.getElementById('deleteCourseTitle').textContent = courseTitle;
             document.getElementById('deleteModal').classList.add('show');
+        }
+        
+        function closePlayer() {
+            // Call LMSFinish if course is active
+            if (window.API && window.API.courseId) {
+                window.API.LMSFinish('');
+            }
+            
+            document.getElementById('player-modal').style.display = 'none';
+            document.getElementById('content-frame').src = '';
+            window.API.courseId = null;
+        }
+        
+        function logout() {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+        }
+
+        // FIX: Event delegation for dynamically created buttons
+        document.getElementById('courses-grid').addEventListener('click', function(e) {
+            // Launch course button
+            if (e.target.classList.contains('launch-btn')) {
+                const courseId = e.target.getAttribute('data-course-id');
+                const title = e.target.getAttribute('data-course-title');
+                if (courseId && title) {
+                    launchCourse(courseId, title);
+                }
+            }
+            
+            // Delete button
+            if (e.target.classList.contains('delete-btn')) {
+                const courseId = e.target.getAttribute('data-course-id');
+                const title = e.target.getAttribute('data-course-title');
+                if (courseId && title) {
+                    showDeleteModal(courseId, title);
+                }
+            }
+        });
+
+        // FIX: Logout button handler without inline onclick
+        document.getElementById('logout-btn').addEventListener('click', logout);
+        
+        // FIX: Close player button handler
+        const closePlayerBtn = document.getElementById('close-player-btn');
+        if (closePlayerBtn) {
+            closePlayerBtn.addEventListener('click', closePlayer);
         }
         
         // Modal event listeners
@@ -294,51 +342,36 @@
                 courseToDelete = null;
             }
         });
-        
-        function closePlayer() {
-            // Call LMSFinish if course is active
-            if (window.API.courseId) {
-                window.API.LMSFinish('');
-            }
-            
-            document.getElementById('player-modal').style.display = 'none';
-            document.getElementById('content-frame').src = '';
-            window.API.courseId = null;
-        }
-        
-        function logout() {
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('user');
-            window.location.href = '/login.html';
-        }
 
         // Drag and drop functionality (admin only)
-        if (currentUser && currentUser.role === 'admin') {
-            const uploadSection = document.querySelector('.upload-section');
+        window.addEventListener('load', function() {
+            if (currentUser && currentUser.role === 'admin') {
+                const uploadSection = document.querySelector('.upload-section');
 
-            uploadSection.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadSection.style.borderColor = '#007bff';
-                uploadSection.style.backgroundColor = '#e7f3ff';
-            });
+                uploadSection.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    uploadSection.style.borderColor = '#007bff';
+                    uploadSection.style.backgroundColor = '#e7f3ff';
+                });
 
-            uploadSection.addEventListener('dragleave', (e) => {
-                e.preventDefault();
-                uploadSection.style.borderColor = '#ddd';
-                uploadSection.style.backgroundColor = '#f8f9fa';
-            });
+                uploadSection.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    uploadSection.style.borderColor = '#ddd';
+                    uploadSection.style.backgroundColor = '#f8f9fa';
+                });
 
-            uploadSection.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadSection.style.borderColor = '#ddd';
-                uploadSection.style.backgroundColor = '#f8f9fa';
-                
-                const file = e.dataTransfer.files[0];
-                if (file && file.name.endsWith('.zip')) {
-                    uploadCourse(file);
-                }
-            });
-        }
+                uploadSection.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    uploadSection.style.borderColor = '#ddd';
+                    uploadSection.style.backgroundColor = '#f8f9fa';
+                    
+                    const file = e.dataTransfer.files[0];
+                    if (file && file.name.endsWith('.zip')) {
+                        uploadCourse(file);
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>

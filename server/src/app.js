@@ -63,14 +63,19 @@ const REFRESH_TOKENS_PATH = path.join(__dirname, '../data/refresh_tokens.json');
 
 // ===== SECURITY MIDDLEWARE =====
 
-// Helmet for security headers
+// Helmet for security headers - CSP for SCORM and Google Analytics
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"], // May need adjustment for SCORM content
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://www.googletagmanager.com"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:"],
+            imgSrc: ["'self'", "data:", "https:", "blob:", "https://www.google-analytics.com"],
+            mediaSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", "https://metrics.articulate.com", "https://www.google-analytics.com", "https://analytics.google.com"],
+            fontSrc: ["'self'", "data:"],
+            objectSrc: ["'none'"],
+            frameSrc: ["'self'"],
         },
     },
 }));
@@ -139,7 +144,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Static files
+// Static files - UPDATED paths
 app.use(express.static(path.join(__dirname, '../../client')));
 app.use('/courses', express.static(path.join(__dirname, '../uploads')));
 
@@ -783,51 +788,19 @@ app.delete('/api/courses/:courseId', authenticateToken, requireAdmin, async (req
     }
 });
 
-// ===== SCORM & SESSION TRACKING =====
+// ===== SCORM API ROUTES - COMPLETELY REWRITTEN =====
 
-app.post('/api/sessions/heartbeat', authenticateToken, (req, res) => {
-    const { sessionId, courseId, userId } = req.body;
+// Initialize SCORM session
+app.post('/api/scorm/initialize', authenticateToken, (req, res) => {
+    const { courseId, userId, sessionId } = req.body;
     
-    if (!sessionId || !courseId || !userId) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    console.log('SCORM Initialize called:', { courseId, userId, sessionId });
+    
+    if (!courseId || !userId) {
+        return res.status(400).json({ error: 'Missing required fields: courseId, userId' });
     }
     
     if (req.user.id !== userId && req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Unauthorized' });
-    }
-    
-    const now = Date.now();
-    
-    if (activeSessions.has(sessionId)) {
-        const session = activeSessions.get(sessionId);
-        session.lastActivity = now;
-    } else {
-        activeSessions.set(sessionId, {
-            courseId,
-            userId,
-            startTime: now,
-            lastActivity: now
-        });
-    }
-    
-    const fiveMinutesAgo = now - (5 * 60 * 1000);
-    for (const [id, session] of activeSessions.entries()) {
-        if (session.lastActivity < fiveMinutesAgo) {
-            activeSessions.delete(id);
-        }
-    }
-    
-    res.json({
-        success: true,
-        activeSessions: activeSessions.size
-    });
-});
-
-app.post('/api/scorm/:courseId/:userId', authenticateToken, (req, res) => {
-    const { courseId, userId } = req.params;
-    const { action, element, value: scormValue, sessionId } = req.body;
-    
-    if (req.user.role !== 'admin' && req.user.id !== userId) {
         return res.status(403).json({ error: 'Unauthorized' });
     }
     
@@ -851,56 +824,152 @@ app.post('/api/scorm/:courseId/:userId', authenticateToken, (req, res) => {
         });
     }
     
+    if (sessionId) {
+        activeSessions.set(sessionId, {
+            courseId,
+            userId,
+            startTime: Date.now(),
+            lastActivity: Date.now()
+        });
+    }
+    
+    console.log('✅ SCORM session initialized');
+    res.json({ success: true });
+});
+
+// Get SCORM value
+app.post('/api/scorm/getValue', authenticateToken, (req, res) => {
+    const { courseId, userId, element } = req.body;
+    
+    console.log('SCORM GetValue called:', { courseId, userId, element });
+    
+    if (!courseId || !userId || !element) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    if (req.user.id !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    const progressKey = `${userId}-${courseId}`;
     const userProgress = progress.get(progressKey);
+    
+    if (!userProgress) {
+        console.log('No progress found, returning empty value');
+        return res.json({ success: true, value: '' });
+    }
+    
+    const value = userProgress.scormData[element] || '';
+    console.log(`✅ Returning value for ${element}:`, value);
+    res.json({ success: true, value });
+});
+
+// Set SCORM value
+app.post('/api/scorm/setValue', authenticateToken, (req, res) => {
+    const { courseId, userId, element, value } = req.body;
+    
+    console.log('SCORM SetValue called:', { courseId, userId, element, value });
+    
+    if (!courseId || !userId || !element) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    if (req.user.id !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    const progressKey = `${userId}-${courseId}`;
+    const userProgress = progress.get(progressKey);
+    
+    if (!userProgress) {
+        return res.status(404).json({ error: 'Progress not found - call initialize first' });
+    }
+    
+    userProgress.scormData[element] = value;
     userProgress.lastAccessed = new Date().toISOString();
     
-    if (action === 'Initialize') {
-        if (sessionId) {
-            activeSessions.set(sessionId, {
-                courseId,
-                userId,
-                startTime: Date.now(),
-                lastActivity: Date.now()
-            });
+    // Update specific fields
+    switch (element) {
+        case 'cmi.core.lesson_status':
+            userProgress.lessonStatus = value;
+            console.log(`Updated lesson status to: ${value}`);
+            break;
+        case 'cmi.core.score.raw':
+            userProgress.score = parseInt(value) || 0;
+            console.log(`Updated score to: ${userProgress.score}`);
+            break;
+        case 'cmi.core.session_time':
+            userProgress.sessionTime = value;
+            break;
+        case 'cmi.suspend_data':
+            userProgress.suspendData = value;
+            break;
+        case 'cmi.core.lesson_location':
+            userProgress.location = value;
+            break;
+    }
+    
+    console.log('✅ Value set successfully');
+    res.json({ success: true });
+});
+
+// Terminate SCORM session
+app.post('/api/scorm/terminate', authenticateToken, (req, res) => {
+    const { sessionId, courseId, userId } = req.body;
+    
+    console.log('SCORM Terminate called:', { sessionId, courseId, userId });
+    
+    if (sessionId) {
+        activeSessions.delete(sessionId);
+        console.log('✅ Session terminated');
+    }
+    
+    res.json({ success: true });
+});
+
+// Session heartbeat - FIXED ROUTE
+app.post('/api/sessions/:sessionId/heartbeat', authenticateToken, (req, res) => {
+    const { sessionId } = req.params;
+    const { courseId, userId } = req.body;
+    
+    console.log('Heartbeat received:', { sessionId, courseId, userId });
+    
+    if (!courseId || !userId) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    if (req.user.id !== userId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    const now = Date.now();
+    
+    if (activeSessions.has(sessionId)) {
+        const session = activeSessions.get(sessionId);
+        session.lastActivity = now;
+    } else {
+        activeSessions.set(sessionId, {
+            courseId,
+            userId,
+            startTime: now,
+            lastActivity: now
+        });
+    }
+    
+    // Cleanup old sessions
+    const fiveMinutesAgo = now - (5 * 60 * 1000);
+    for (const [id, session] of activeSessions.entries()) {
+        if (session.lastActivity < fiveMinutesAgo) {
+            activeSessions.delete(id);
         }
-        res.json({ success: true });
     }
-    else if (action === 'GetValue') {
-        const storedValue = userProgress.scormData[element] || '';
-        res.json({ success: true, scormValue: storedValue });
-    }
-    else if (action === 'SetValue') {
-        userProgress.scormData[element] = scormValue;
-        
-        switch (element) {
-            case 'cmi.core.lesson_status':
-                userProgress.lessonStatus = scormValue;
-                break;
-            case 'cmi.core.score.raw':
-                userProgress.score = parseInt(scormValue) || 0;
-                break;
-            case 'cmi.core.session_time':
-                userProgress.sessionTime = scormValue;
-                break;
-            case 'cmi.suspend_data':
-                userProgress.suspendData = scormValue;
-                break;
-            case 'cmi.core.lesson_location':
-                userProgress.location = scormValue;
-                break;
-        }
-        
-        res.json({ success: true });
-    }
-    else if (action === 'Terminate') {
-        if (sessionId) {
-            activeSessions.delete(sessionId);
-        }
-        res.json({ success: true });
-    }
-    else {
-        res.json({ success: true });
-    }
+    
+    console.log(`✅ Heartbeat updated. Active sessions: ${activeSessions.size}`);
+    
+    res.json({
+        success: true,
+        activeSessions: activeSessions.size
+    });
 });
 
 // ===== PROGRESS & STATS ROUTES =====
