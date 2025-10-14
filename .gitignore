@@ -1,0 +1,18 @@
+# NEVER commit these files
+.env
+.env.local
+.env.production
+
+# Data files
+users.json
+courses.json
+refresh_tokens.json
+
+# Uploads
+uploads/
+
+# Node modules
+node_modules/
+
+# Logs
+*.log

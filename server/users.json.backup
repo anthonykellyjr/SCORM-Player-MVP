@@ -1,0 +1,30 @@
+[
+  {
+    "id": "1",
+    "email": "anthony.d.kelly@gmail.com",
+    "password": "$2b$10$KQE02ulPCFkpsLXgWYRoxeBfwKXir7EZTJUcpg4685svuWmbq03PK",
+    "name": "Anthony Kelly",
+    "role": "admin"
+  },
+  {
+    "id": "2",
+    "email": "nathan@orthoskool.com",
+    "password": "$2b$10$neDyVwXXGVrShnH2q9KOMuUaiHr0NxKgbjNYYQV6XskB6lJF9JSuS",
+    "name": "Nathan",
+    "role": "admin"
+  },
+  {
+    "id": "3",
+    "email": "ryan@orthoskool.com",
+    "password": "$2b$10$9jD8/u0FL8rVJhKghJoEB.nfJkbVfJtwiRzZ4qOagIfXkHzHaFdfa",
+    "name": "Ryan",
+    "role": "admin"
+  },
+  {
+    "id": "4",
+    "email": "student@orthoskool.com",
+    "password": "$2b$10$LyvUqTU2oXOtRQNkX3FV6O.6rcM1GkWEasJGbcSHs/ZKyWukXJNFS",
+    "name": "Demo Student",
+    "role": "student"
+  }
+]

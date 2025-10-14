@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - OrthoSkool LMS</title>
+    <link href="css/admin.css" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <div>
+                <h1>Admin Dashboard</h1>
+                <p class="subtitle">Course Activity & Progress Tracking</p>
+            </div>
+            <div class="header-actions">
+            <span id="user-name"></span>
+            <button id="refreshBtn" class="btn-refresh">Refresh</button>
+            <a href="index.html" class="btn-secondary">Back to Courses</a>
+            <button id="logoutBtn" class="btn-logout">Logout</button>
+        </div>
+        </header>
+
+        <!-- Summary Cards -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="card-content">
+                    <h3 id="totalCourses">0</h3>
+                    <p>Total Courses</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-content">
+                    <h3 id="totalUsers">0</h3>
+                    <p>Active Users</p>
+                </div>
+            </div>
+            <div class="summary-card highlight">
+                <div class="card-content">
+                    <h3 id="activeSessions">0</h3>
+                    <p>Active Sessions</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-content">
+                    <h3 id="completionRate">0%</h3>
+                    <p>Completion Rate</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-content">
+                    <h3 id="averageScore">0%</h3>
+                    <p>Average Score</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Sessions -->
+        <section class="data-section">
+            <h2>Active Sessions</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Course</th>
+                            <th>Started</th>
+                            <th>Duration</th>
+                            <th>Last Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activeSessionsBody">
+                        <tr><td colspan="5" class="empty-state">No active sessions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Recent Activity -->
+        <section class="data-section">
+            <h2>Recent Activity & Progress</h2>
+            <div class="filters">
+                <select id="userFilter">
+                    <option value="all">All Users</option>
+                </select>
+                <select id="courseFilter">
+                    <option value="all">All Courses</option>
+                </select>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User ID</th>
+                            <th>Course</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Score</th>
+                            <th>Time Spent</th>
+                            <th>Last Accessed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activityTableBody">
+                        <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Course Statistics -->
+        <section class="data-section">
+            <h2>Course Performance</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Course Name</th>
+                            <th>Enrollments</th>
+                            <th>Completed</th>
+                            <th>Completion Rate</th>
+                            <th>Avg Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="courseStatsBody">
+                        <tr><td colspan="5" class="empty-state">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script src="js/utils/api.js"></script>
+    <script src="js/pages/admin.js"></script>
+</body>
+</html>

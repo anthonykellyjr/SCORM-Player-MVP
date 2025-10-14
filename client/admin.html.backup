@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="css/admin.css" rel="stylesheet" />
+    <title>Admin Dashboard - SCORM Player</title>
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <div>
+                <h1>📊 Admin Dashboard</h1>
+                <p class="subtitle">Course Activity & Progress Tracking</p>
+            </div>
+            <div class="header-actions">
+                <span id="user-name" style="color: #fff; margin-right: 15px;"></span>
+                <button onclick="refreshData()" class="btn-refresh">🔄 Refresh</button>
+                <a href="index.html" class="btn-secondary">← Back to Courses</a>
+                <button onclick="logout()" class="btn-logout">Logout</button>
+            </div>
+        </header>
+
+        <!-- Summary Cards -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="card-icon">📚</div>
+                <div class="card-content">
+                    <h3 id="totalCourses">0</h3>
+                    <p>Total Courses</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon">👥</div>
+                <div class="card-content">
+                    <h3 id="totalUsers">0</h3>
+                    <p>Active Users</p>
+                </div>
+            </div>
+            <div class="summary-card highlight">
+                <div class="card-icon">⚡</div>
+                <div class="card-content">
+                    <h3 id="activeSessions">0</h3>
+                    <p>Active Sessions</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon">📈</div>
+                <div class="card-content">
+                    <h3 id="completionRate">0%</h3>
+                    <p>Completion Rate</p>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon">⭐</div>
+                <div class="card-content">
+                    <h3 id="averageScore">0%</h3>
+                    <p>Average Score</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Sessions Table -->
+        <section class="data-section">
+            <h2>🔴 Active Sessions Right Now</h2>
+            <div class="table-container">
+                <table id="activeSessionsTable">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Course</th>
+                            <th>Started</th>
+                            <th>Duration</th>
+                            <th>Last Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activeSessionsBody">
+                        <tr>
+                            <td colspan="5" class="empty-state">No active sessions</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Recent Activity Table -->
+        <section class="data-section">
+            <h2>Recent Activity & Progress</h2>
+            <div class="filters">
+                <select id="userFilter" onchange="filterData()">
+                    <option value="all">All Users</option>
+                </select>
+                <select id="courseFilter" onchange="filterData()">
+                    <option value="all">All Courses</option>
+                </select>
+            </div>
+            <div class="table-container">
+                <table id="activityTable">
+                    <thead>
+                        <tr>
+                            <th>User ID</th>
+                            <th>Course</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Score</th>
+                            <th>Time Spent</th>
+                            <th>Last Accessed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activityTableBody">
+                        <tr>
+                            <td colspan="7" class="empty-state">Loading data...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Course Statistics -->
+        <section class="data-section">
+            <h2>Course Performance</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Course Name</th>
+                            <th>Enrollments</th>
+                            <th>Completed</th>
+                            <th>Completion Rate</th>
+                            <th>Avg Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="courseStatsBody">
+                        <tr>
+                            <td colspan="5" class="empty-state">Loading course statistics...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const API_ENDPOINT = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000' 
+            : 'https://dev.orthoskool.com';
+
+        let allProgressData = [];
+        let token = null;
+        let currentUser = null;
+
+        // Check authentication and load data on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            token = localStorage.getItem('accessToken');
+            const userStr = localStorage.getItem('user');
+            
+            if (!token || !userStr) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            currentUser = JSON.parse(userStr);
+            
+            // Check if user is admin
+            if (currentUser.role !== 'admin') {
+                alert('Access denied. Admin privileges required.');
+                window.location.href = '/index.html';
+                return;
+            }
+
+            // Display user name
+            document.getElementById('user-name').textContent = `👤 ${currentUser.name}`;
+
+            // Load initial data
+            await refreshData();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(refreshData, 30000);
+        });
+
+        async function refreshData() {
+            console.log('🔄 Refreshing dashboard data...');
+            await Promise.all([
+                loadSummaryStats(),
+                loadActiveSessions(),
+                loadProgressData(),
+                loadCourseStats()
+            ]);
+        }
+
+        async function apiRequest(endpoint) {
+            try {
+                const response = await fetch(`${API_ENDPOINT}${endpoint}`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.status === 401 || response.status === 403) {
+                    alert('Session expired. Please login again.');
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = '/login.html';
+                    throw new Error('Authentication failed');
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching ${endpoint}:`, error);
+                throw error;
+            }
+        }
+
+        async function loadSummaryStats() {
+            try {
+                const stats = await apiRequest('/api/stats/summary');
+                console.log('📊 Summary stats:', stats);
+
+                document.getElementById('totalCourses').textContent = stats.totalCourses || 0;
+                document.getElementById('totalUsers').textContent = stats.totalUsers || 0;
+                document.getElementById('activeSessions').textContent = stats.activeSessions || 0;
+                document.getElementById('completionRate').textContent = `${stats.completionRate || 0}%`;
+                document.getElementById('averageScore').textContent = `${stats.averageScore || 0}%`;
+            } catch (error) {
+                console.error('Failed to load summary stats:', error);
+            }
+        }
+
+        async function loadActiveSessions() {
+            try {
+                const sessions = await apiRequest('/api/sessions/active');
+                console.log('⚡ Active sessions:', sessions);
+
+                // Fetch users to get names
+                const users = await apiRequest('/api/admin/users');
+                const userMap = {};
+                users.forEach(u => userMap[u.id] = u);
+
+                const tbody = document.getElementById('activeSessionsBody');
+                
+                if (sessions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No active sessions</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = sessions.map(session => {
+                    const user = userMap[session.userId];
+                    const userName = user ? user.name : `User ${session.userId}`;
+                    
+                    return `
+                        <tr>
+                            <td><strong>${userName}</strong></td>
+                            <td>${session.courseName}</td>
+                            <td>${formatTime(session.startTime)}</td>
+                            <td><span class="badge badge-active">${session.duration}</span></td>
+                            <td>${formatTime(session.lastActivity)}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Failed to load active sessions:', error);
+            }
+        }
+
+        async function loadProgressData() {
+            try {
+                allProgressData = await apiRequest('/api/progress');
+                console.log('📈 Progress data:', allProgressData);
+
+                // Populate filters
+                populateFilters();
+
+                // Display data
+                displayProgressData(allProgressData);
+            } catch (error) {
+                console.error('Failed to load progress data:', error);
+                document.getElementById('activityTableBody').innerHTML = 
+                    '<tr><td colspan="7" class="empty-state">Failed to load data</td></tr>';
+            }
+        }
+
+        async function loadCourseStats() {
+            try {
+                const courseStats = await apiRequest('/api/stats/courses');
+                console.log('📚 Course stats:', courseStats);
+
+                const tbody = document.getElementById('courseStatsBody');
+                
+                if (courseStats.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No course data available</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = courseStats.map(stat => `
+                    <tr>
+                        <td><strong>${stat.courseName}</strong></td>
+                        <td>${stat.totalEnrollments}</td>
+                        <td>${stat.completed}</td>
+                        <td>${stat.completionRate}%</td>
+                        <td><strong>${stat.averageScore}%</strong></td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load course stats:', error);
+            }
+        }
+
+        function populateFilters() {
+            const users = [...new Set(allProgressData.map(p => p.userId))];
+            const courses = [...new Set(allProgressData.map(p => ({ id: p.courseId, name: p.courseName })))];
+
+            const userFilter = document.getElementById('userFilter');
+            userFilter.innerHTML = '<option value="all">All Users</option>' +
+                users.map(user => `<option value="${user}">User ${user}</option>`).join('');
+
+            const courseFilter = document.getElementById('courseFilter');
+            courseFilter.innerHTML = '<option value="all">All Courses</option>' +
+                courses.map(course => `<option value="${course.id}">${course.name}</option>`).join('');
+        }
+
+        function filterData() {
+            const userFilter = document.getElementById('userFilter').value;
+            const courseFilter = document.getElementById('courseFilter').value;
+
+            let filteredData = allProgressData;
+
+            if (userFilter !== 'all') {
+                filteredData = filteredData.filter(p => p.userId === userFilter);
+            }
+
+            if (courseFilter !== 'all') {
+                filteredData = filteredData.filter(p => p.courseId === courseFilter);
+            }
+
+            displayProgressData(filteredData);
+        }
+
+        function displayProgressData(data) {
+            const tbody = document.getElementById('activityTableBody');
+
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No data available. Launch a course to see tracking data here.</td></tr>';
+                return;
+            }
+
+            // Sort by last accessed (most recent first)
+            data.sort((a, b) => new Date(b.lastAccessed) - new Date(a.lastAccessed));
+
+            tbody.innerHTML = data.map(item => {
+                const statusClass = getStatusClass(item.lessonStatus);
+                const statusText = item.displayStatus || item.lessonStatus || 'not attempted';
+                
+                return `
+                    <tr>
+                        <td><strong>User ${item.userId}</strong></td>
+                        <td>${item.courseName}</td>
+                        <td><span class="status-badge status-${statusClass}">${statusText}</span></td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${item.progressPercent}%"></div>
+                            </div>
+                            <span class="progress-text">${item.progressPercent}%</span>
+                        </td>
+                        <td><strong>${item.score !== null ? item.score + '%' : '-'}</strong></td>
+                        <td>${item.sessionTime || '00:00:00'}</td>
+                        <td>${formatDate(item.lastAccessed)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function getStatusClass(status) {
+            const statusMap = {
+                'completed': 'completed',
+                'passed': 'completed',
+                'incomplete': 'in-progress',
+                'failed': 'failed',
+                'not attempted': 'not-started'
+            };
+            return statusMap[status?.toLowerCase()] || 'not-started';
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins} min ago`;
+            if (diffHours < 24) return `${diffHours} hours ago`;
+            if (diffDays < 7) return `${diffDays} days ago`;
+            
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatTime(dateString) {
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+        }
+    </script>
+
+    <style>
+        .btn-logout {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .btn-logout:hover {
+            background: #dc2626;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .badge-active {
+            background: #10b981;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .highlight {
+            border: 2px solid #10b981;
+        }
+    </style>
+</body>
+</html>

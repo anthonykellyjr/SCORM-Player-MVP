@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course Player</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            overflow: hidden;
+        }
+        
+        .player-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .player-header {
+            background: #2d2d2d;
+            color: white;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .course-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .user-badge {
+            background: #4a5568;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .close-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        
+        .close-btn:hover {
+            background: #dc2626;
+        }
+        
+        .content-frame {
+            flex: 1;
+            border: none;
+            width: 100%;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="player-container">
+        <div class="player-header">
+            <div class="header-left">
+                <div class="course-title" id="courseTitle">Loading...</div>
+                <div class="user-badge">
+                    <span>👤</span>
+                    <span id="userName">User</span>
+                </div>
+            </div>
+            <button class="close-btn" onclick="closePlayer()">✕ Exit Course</button>
+        </div>
+        <iframe id="contentFrame" class="content-frame"></iframe>
+    </div>
+
+    <!-- Load SCORM API first -->
+    <script src="/js/scorm-api.js"></script>
+    
+    <script>
+        const API_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000' 
+            : 'https://dev.orthoskool.com';
+
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = urlParams.get('courseId');
+        const courseTitle = urlParams.get('title');
+        
+        let token = null;
+        let currentUser = null;
+
+        // Check authentication and load course
+        window.onload = async function() {
+            token = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!token || !userStr) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            currentUser = JSON.parse(userStr);
+
+            // Display course and user info
+            document.getElementById('courseTitle').textContent = courseTitle || 'Course';
+            document.getElementById('userName').textContent = currentUser.name;
+            
+            console.log('Player loaded for:', {
+                courseId,
+                userId: currentUser.id,
+                userName: currentUser.name
+            });
+            
+            // The SCORM API is already initialized with courseId and userId from URL params
+            // Just need to ensure the token is available for authenticated requests
+            
+            // Load course content
+            try {
+                const response = await fetch(`${API_URL}/api/courses/${courseId}/launch`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.status === 401 || response.status === 403) {
+                    alert('Session expired. Please login again.');
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = '/login.html';
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.launchUrl) {
+                    console.log('Loading course from:', data.launchUrl);
+                    document.getElementById('contentFrame').src = data.launchUrl;
+                } else {
+                    alert('Could not get course launch URL');
+                }
+            } catch (error) {
+                console.error('Error loading course:', error);
+                alert('Error loading course: ' + error.message);
+            }
+        };
+        
+        function closePlayer() {
+            console.log('Closing player...');
+            
+            // Call LMSFinish if SCORM API is initialized
+            if (window.API && window.API._initialized && !window.API._finished) {
+                console.log('Calling LMSFinish');
+                window.API.LMSFinish('');
+            }
+            
+            // Return to course library
+            window.location.href = 'index.html';
+        }
+        
+        // Handle browser back button and page close
+        window.addEventListener('beforeunload', function(e) {
+            if (window.API && window.API._initialized && !window.API._finished) {
+                console.log('Page unload - calling LMSFinish');
+                window.API.LMSFinish('');
+            }
+        });
+
+        // Also handle visibility change (tab switch, minimize, etc)
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden') {
+                console.log('Page hidden - committing data');
+                if (window.API && window.API._initialized && !window.API._finished) {
+                    window.API.LMSCommit('');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
